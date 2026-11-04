@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>템포·키 분석기</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="템포·키">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#E8EBEF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1115" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+
+<style>
+/* Layout: rack-style panels. Upload strip, transport bar, two readout panels (tempo, key), then full-width chroma and tap-tempo rows. */
+:root {
+  --bg: #E8EBEF;
+  --panel: #F7F8FA;
+  --ink: #13171C;
+  --muted: #5B6571;
+  --line: #CBD2DA;
+  --soft: #DDE3EA;
+  --accent: #2D5BD6;
+  --accent-ink: #FFFFFF;
+  --major: #B0640E;
+  --minor: #6447C2;
+  --warn: #B23A2E;
+  --f-display: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --f-body: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E1115; --panel: #161A20; --ink: #E5E9EE; --muted: #8C96A3; --line: #2A3139; --soft: #20262E;
+    --accent: #7095FF; --accent-ink: #0B0E12; --major: #E9A452; --minor: #A68CFF; --warn: #F07A6C;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E1115; --panel: #161A20; --ink: #E5E9EE; --muted: #8C96A3; --line: #2A3139; --soft: #20262E;
+  --accent: #7095FF; --accent-ink: #0B0E12; --major: #E9A452; --minor: #A68CFF; --warn: #F07A6C;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.55; }
+.wrap {
+  max-width: 1040px; margin: 0 auto;
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 16px;
+}
+h1 { font-size: 26px; line-height: 1.2; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.lede { margin: 6px 0 0; color: var(--muted); max-width: 60ch; }
+.label { font-family: var(--f-display); font-size: 11px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+
+header { display: grid; grid-template-columns: 1fr minmax(0, 380px); gap: 20px; align-items: end; }
+.drop {
+  position: relative; display: flex; flex-direction: column; gap: 2px;
+  padding: 16px 18px; border: 1.5px dashed var(--line); border-radius: 10px;
+  background: var(--panel); cursor: pointer; transition: border-color .15s, background .15s;
+}
+.drop:hover, .drop.over { border-color: var(--accent); }
+.drop:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.drop input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.drop strong { font-size: 16px; color: var(--accent); }
+.drop span { font-size: 13px; color: var(--muted); }
+
+.transport {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px;
+  padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+}
+.trackinfo { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 260px; }
+.tag { font-family: var(--f-display); font-size: 10.5px; letter-spacing: .1em; padding: 3px 7px; border-radius: 4px; background: var(--soft); color: var(--muted); white-space: nowrap; }
+.tag.real { background: var(--accent); color: var(--accent-ink); }
+#trackName { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#trackMeta { color: var(--muted); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.controls { display: flex; align-items: center; gap: 10px; flex: 2 1 360px; min-width: 0; }
+button {
+  font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+  padding: 7px 14px; border-radius: 7px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--ink); white-space: nowrap;
+}
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); min-width: 72px; }
+button[aria-pressed="true"] { background: var(--soft); border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+#seek { flex: 1; min-width: 60px; accent-color: var(--accent); }
+#time { font-family: var(--f-display); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.status { padding: 10px 14px; border-radius: 8px; background: var(--soft); font-size: 14px; }
+.status.error { color: var(--warn); }
+
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.panel.wide { grid-column: 1 / -1; }
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+
+.readout { display: flex; align-items: baseline; gap: 6px; font-family: var(--f-display); font-weight: 300; font-variant-numeric: tabular-nums; line-height: 1; }
+.readout .big { font-size: clamp(64px, 11vw, 108px); letter-spacing: -0.04em; }
+.readout .dec { font-size: clamp(24px, 4vw, 36px); color: var(--muted); }
+.readout .unit { font-size: 15px; font-weight: 500; letter-spacing: .1em; color: var(--muted); margin-left: 6px; }
+
+.range-wrap { display: flex; align-items: center; gap: 8px; }
+select { font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.led { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); opacity: .15; transition: opacity 60ms linear; }
+.led.on { opacity: 1; box-shadow: 0 0 10px var(--accent); }
+
+.mode-chip { font-family: var(--f-body); font-size: 18px; font-weight: 700; padding: 4px 10px; border-radius: 6px; letter-spacing: 0; align-self: center; margin-left: 10px; color: var(--accent-ink); background: var(--muted); }
+#keyPanel.major .mode-chip { background: var(--major); }
+#keyPanel.minor .mode-chip { background: var(--minor); }
+#keyPanel.major { --mode: var(--major); }
+#keyPanel.minor { --mode: var(--minor); }
+
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; }
+.facts div { border-top: 1px solid var(--line); padding-top: 8px; min-width: 0; }
+.facts dt { font-size: 12px; color: var(--muted); }
+.facts dd { margin: 2px 0 0; font-family: var(--f-display); font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.conf-high { color: var(--accent); }
+.conf-low { color: var(--warn); }
+
+.chart { width: 100%; height: auto; display: block; }
+.chart .area { fill: var(--accent); opacity: .12; }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+.chart .grid-l { stroke: var(--line); stroke-width: 1; }
+.chart text { fill: var(--muted); font-family: var(--f-display); font-size: 10px; }
+.chart .mark { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart .dot { fill: var(--ink); }
+.caption { font-size: 12.5px; color: var(--muted); margin: -6px 0 0; }
+
+.cands { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cands li { display: grid; grid-template-columns: 76px 1fr 44px; align-items: center; gap: 10px; font-size: 13.5px; }
+.cands .name { font-weight: 500; white-space: nowrap; }
+.cands .track { height: 6px; background: var(--soft); border-radius: 3px; overflow: hidden; }
+.cands .fill { height: 100%; border-radius: 3px; background: var(--muted); }
+.cands .fill.major { background: var(--major); }
+.cands .fill.minor { background: var(--minor); }
+.cands .val { font-family: var(--f-display); font-size: 12px; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+
+.chroma { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px; align-items: end; height: 150px; }
+.chroma .col { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-end; height: 100%; gap: 6px; min-width: 0; }
+.chroma .bar { background: var(--soft); border-radius: 4px 4px 2px 2px; min-height: 3px; transition: height .4s ease; }
+.chroma .col.in .bar { background: var(--mode, var(--accent)); opacity: .55; }
+.chroma .col.tonic .bar { opacity: 1; }
+.chroma .pc { text-align: center; font-family: var(--f-display); font-size: 12px; color: var(--muted); }
+.chroma .col.tonic .pc { color: var(--ink); font-weight: 500; }
+.chroma-wrap { --mode: var(--accent); }
+.chroma-wrap.major { --mode: var(--major); }
+.chroma-wrap.minor { --mode: var(--minor); }
+
+.tap-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 24px; }
+#tapBtn { font-size: 18px; padding: 16px 28px; border-radius: 10px; min-width: 140px; touch-action: manipulation; user-select: none; }
+#tapBtn.hit { background: var(--soft); border-color: var(--accent); }
+.tap-out { display: flex; align-items: baseline; gap: 8px; font-family: var(--f-display); font-variant-numeric: tabular-nums; }
+.tap-out b { font-size: 40px; font-weight: 300; }
+.tap-out span { color: var(--muted); font-size: 13px; }
+.tap-note { color: var(--muted); font-size: 13.5px; margin: 0; max-width: 52ch; }
+kbd { font-family: var(--f-display); font-size: 12px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); }
+
+footer { color: var(--muted); font-size: 13px; max-width: 72ch; }
+footer p { margin: 0 0 6px; }
+
+@media (max-width: 720px) {
+  header { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: minmax(0, 1fr); }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .chroma { gap: 3px; height: 120px; }
+  .chroma .pc { font-size: 10.5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chroma .bar, .led { transition: none; }
+}
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>템포·키 분석기</h1>
+      <p class="lede">음악 파일을 올리면 BPM과 조성(장조·단조)을 분석합니다. 파일은 이 기기 안에서만 처리되며 어디에도 전송되지 않습니다.</p>
+    </div>
+    <label class="drop" id="drop">
+      <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac,.aiff">
+      <strong>음악 파일 선택</strong>
+      <span id="dropHint">또는 이 화면에 끌어다 놓기 · MP3, WAV, M4A, FLAC, OGG</span>
+    </label>
+  </header>
+
+  <section class="transport" aria-label="재생">
+    <div class="trackinfo">
+      <span class="tag" id="srcTag">예시</span>
+      <span id="trackName">합성 예시 루프 (124 BPM, A 단조로 만듦)</span>
+      <span id="trackMeta"></span>
+    </div>
+    <div class="controls">
+      <button class="primary" id="play" disabled>재생</button>
+      <button id="clickBtn" aria-pressed="false" title="감지된 박자에 맞춰 클릭음을 겹쳐 들려줍니다">메트로놈</button>
+      <input type="range" id="seek" min="0" max="1000" value="0" aria-label="재생 위치">
+      <span id="time">0:00 / 0:00</span>
+    </div>
+  </section>
+
+  <div class="status" id="status" role="status" hidden></div>
+
+  <main class="grid">
+    <section class="panel" id="bpmPanel" aria-label="템포">
+      <div class="panel-head">
+        <span class="label">템포</span>
+        <span class="range-wrap">
+          <label for="range" class="label">범위</label>
+          <select id="range">
+            <option value="auto">자동</option>
+            <option value="60">60–120</option>
+            <option value="80">80–160</option>
+            <option value="100">100–200</option>
+          </select>
+          <span class="led" id="led" aria-hidden="true"></span>
+        </span>
+      </div>
+      <div class="readout"><span class="big" id="bpmInt">--</span><span class="dec" id="bpmDec"></span><span class="unit">BPM</span></div>
+      <dl class="facts">
+        <div><dt>신뢰도</dt><dd id="bpmConf">-</dd></div>
+        <div><dt>절반 / 두 배</dt><dd id="bpmAlt">-</dd></div>
+        <div><dt>한 박 길이</dt><dd id="bpmMs">-</dd></div>
+      </dl>
+      <svg class="chart" id="tempoChart" viewBox="0 0 600 130" role="img" aria-label="템포 후보 점수 그래프"></svg>
+      <p class="caption">템포 후보별 점수(60–200 BPM). 뾰족한 봉우리가 하나일수록 결과가 확실합니다.</p>
+    </section>
+
+    <section class="panel" id="keyPanel" aria-label="조성">
+      <div class="panel-head"><span class="label">조성 (Key)</span><span class="label" id="keyEn"></span></div>
+      <div class="readout"><span class="big" id="keyTonic">--</span><span class="mode-chip" id="keyMode">-</span></div>
+      <dl class="facts">
+        <div><dt>신뢰도</dt><dd id="keyConf">-</dd></div>
+        <div><dt>나란한조</dt><dd id="keyRel">-</dd></div>
+        <div><dt>캠롯 (DJ)</dt><dd id="keyCam">-</dd></div>
+      </dl>
+      <div class="label">후보 조성</div>
+      <ol class="cands" id="cands"></ol>
+    </section>
+
+    <section class="panel wide chroma-wrap" id="chromaPanel" aria-label="음높이 분포">
+      <div class="panel-head"><span class="label">음높이 분포 (크로마)</span><span class="label" id="scaleLabel"></span></div>
+      <div class="chroma" id="chroma"></div>
+      <p class="caption">곡 전체에서 12개 음이 얼마나 울렸는지 보여 줍니다. 색칠된 막대는 감지된 조의 음계음, 진한 막대는 으뜸음입니다.</p>
+    </section>
+
+    <section class="panel wide" aria-label="탭 템포">
+      <div class="panel-head"><span class="label">탭 템포로 직접 확인</span></div>
+      <div class="tap-row">
+        <button id="tapBtn">탭</button>
+        <div class="tap-out"><b id="tapBpm">--</b><span>BPM · <span id="tapCount">0</span>회</span></div>
+        <p class="tap-note">곡을 들으며 박자에 맞춰 버튼을 누르거나 <kbd>T</kbd> 키를 누르세요. 2초 이상 멈추면 새로 셉니다. 분석값이 절반이나 두 배로 나올 때 비교용으로 쓰면 좋습니다.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>BPM은 소리의 시작점(어택) 패턴을 자기상관으로 분석해 구하고, 조성은 12음 분포를 Krumhansl 조성 프로필과 비교해 추정합니다.</p>
+    <p>템포가 바뀌는 곡, 리듬이 약한 곡, 조바꿈이 있는 곡은 결과가 부정확할 수 있습니다. 나란한조(예: C 장조와 A 단조)는 같은 음을 쓰므로 서로 헷갈리기 쉽습니다.</p>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const AR = 22050; // analysis sample rate
+
+  // ---------- DSP helpers ----------
+  function makeFFT(n) {
+    const cos = new Float32Array(n / 2), sin = new Float32Array(n / 2);
+    for (let i = 0; i < n / 2; i++) { cos[i] = Math.cos(2 * Math.PI * i / n); sin[i] = Math.sin(2 * Math.PI * i / n); }
+    const bits = Math.log2(n), rev = new Uint32Array(n);
+    for (let i = 0; i < n; i++) { let r = 0, x = i; for (let b = 0; b < bits; b++) { r = (r << 1) | (x & 1); x >>= 1; } rev[i] = r; }
+    return (re, im) => {
+      for (let i = 0; i < n; i++) {
+        const j = rev[i];
+        if (j > i) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+      }
+      for (let size = 2; size <= n; size <<= 1) {
+        const half = size >> 1, step = n / size;
+        for (let i = 0; i < n; i += size) {
+          for (let j = i, k = 0; j < i + half; j++, k += step) {
+            const l = j + half;
+            const tre = re[l] * cos[k] + im[l] * sin[k];
+            const tim = im[l] * cos[k] - re[l] * sin[k];
+            re[l] = re[j] - tre; im[l] = im[j] - tim;
+            re[j] += tre; im[j] += tim;
+          }
+        }
+      }
+    };
+  }
+  const hann = n => Float32Array.from({ length: n }, (_, i) => 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)));
+  const tick = () => new Promise(r => setTimeout(r, 0));
+
+  async function toMono(buffer) {
+    const len = Math.max(1, Math.ceil(buffer.duration * AR));
+    const off = new OfflineAudioContext(1, len, AR);
+    const src = off.createBufferSource();
+    src.buffer = buffer; src.connect(off.destination); src.start();
+    const r = await off.startRendering();
+    return r.getChannelData(0);
+  }
+
+  // Spectral-flux onset envelope with a local-mean threshold.
+  function onsetEnvelope(x) {
+    const N = 1024, H = 128, fft = makeFFT(N), win = hann(N);
+    const nF = Math.max(0, Math.floor((x.length - N) / H) + 1);
+    const raw = new Float32Array(nF), low = new Float32Array(nF), prev = new Float32Array(N / 2);
+    const lowK = Math.round(150 * N / AR);
+    const re = new Float32Array(N), im = new Float32Array(N);
+    for (let f = 0; f < nF; f++) {
+      const o = f * H;
+      for (let i = 0; i < N; i++) { re[i] = x[o + i] * win[i]; im[i] = 0; }
+      fft(re, im);
+      let s = 0, sl = 0;
+      for (let k = 1; k < N / 2; k++) {
+        const m = Math.log1p(100 * Math.sqrt(re[k] * re[k] + im[k] * im[k]));
+        const d = m - prev[k];
+        if (d > 0) { s += d; if (k <= lowK) sl += d; }
+        prev[k] = m;
+      }
+      raw[f] = f === 0 ? 0 : s;
+      low[f] = f === 0 ? 0 : sl;
+    }
+    const hop = H / AR, w = Math.round(0.4 / hop);
+    const pre = new Float64Array(nF + 1);
+    for (let i = 0; i < nF; i++) pre[i + 1] = pre[i] + raw[i];
+    const env = new Float32Array(nF);
+    for (let i = 0; i < nF; i++) {
+      const a = Math.max(0, i - w), b = Math.min(nF, i + w + 1);
+      env[i] = Math.max(0, raw[i] - (pre[b] - pre[a]) / (b - a));
+    }
+    // Flux peaks a little before the true onset because the window leads it.
+    return { env, low, hop, lead: 0.03 };
+  }
+
+  function estimateTempo(env, hop) {
+    const n = env.length;
+    let mean = 0; for (let i = 0; i < n; i++) mean += env[i]; mean /= n;
+    const e = Float32Array.from(env, v => v - mean);
+    const maxLag = Math.min(n - 2, Math.ceil(2 * 60 / 50 / hop) + 2);
+    const acf = new Float64Array(maxLag + 2);
+    for (let l = 0; l <= maxLag + 1; l++) {
+      let s = 0; for (let i = 0; i + l < n; i++) s += e[i] * e[i + l];
+      acf[l] = s / (n - l);
+    }
+    const A = lag => { if (lag > maxLag) return 0; const i = Math.floor(lag), f = lag - i; return acf[i] * (1 - f) + acf[i + 1] * f; };
+    const bpms = [], scores = [];
+    for (let b = 50; b <= 210.001; b += 0.1) {
+      const L = 60 / b / hop;
+      const prior = Math.exp(-0.5 * Math.pow(Math.log2(b / 120) / 0.9, 2));
+      // The half-period term rejects 3:2 mistakes, whose half-beat falls between real onsets.
+      bpms.push(b); scores.push((A(L) + 0.5 * A(2 * L) + 0.5 * A(L / 2)) * prior);
+    }
+    let bi = 0; for (let i = 1; i < scores.length; i++) if (scores[i] > scores[bi]) bi = i;
+    const m = scores.reduce((a, v) => a + v, 0) / scores.length;
+    const sd = Math.sqrt(scores.reduce((a, v) => a + (v - m) * (v - m), 0) / scores.length) || 1;
+    const z = (scores[bi] - m) / sd;
+    return { bpm: bpms[bi], bpms, scores, conf: Math.max(0, Math.min(1, (z - 1.5) / 2.5)) };
+  }
+
+  // Fine-tune tempo and find beat phase by aligning a beat grid with onsets over the whole track.
+  function refineBeat(env, low, hop, lead, bpm) {
+    const n = env.length, sm = new Float32Array(n), k = [0.25, 0.5, 1, 0.5, 0.25];
+    for (let i = 0; i < n; i++) { let s = 0; for (let j = -2; j <= 2; j++) { const t = i + j; if (t >= 0 && t < n) s += env[t] * k[j + 2]; } sm[i] = s; }
+    let best = { score: -1, bpm, phase: 0 };
+    for (let r = -0.012; r <= 0.0121; r += 0.0004) {
+      const b = bpm * (1 + r), p = 60 / b / hop;
+      for (let ph = 0; ph < p; ph += 0.5) {
+        let s = 0, c = 0;
+        for (let t = ph; t < n - 1; t += p) { const i = t | 0, f = t - i; s += sm[i] * (1 - f) + sm[i + 1] * f; c++; }
+        if (c && s / c > best.score) best = { score: s / c, bpm: b, ph };
+      }
+    }
+    // The grid may have locked onto off-beats; beats usually carry more low-end (kick, bass) onsets.
+    const p = 60 / best.bpm / hop, lowSum = ph => { let s = 0; for (let t = ph; t < n - 1; t += p) s += low[Math.round(t)]; return s; };
+    let ph = best.ph;
+    if (lowSum((ph + p / 2) % p) > lowSum(ph) * 1.15) ph = (ph + p / 2) % p;
+    best.phase = (ph * hop + lead) % (p * hop);
+    return best;
+  }
+
+  const PROFILE = {
+    major: [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
+    minor: [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
+  };
+  const MAJOR_NAMES = ["C", "D♭", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
+  const MINOR_NAMES = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "G♯", "A", "B♭", "B"];
+  const PC_LABELS = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
+  const SCALE = { major: [0, 2, 4, 5, 7, 9, 11], minor: [0, 2, 3, 5, 7, 8, 10] };
+  const keyName = (t, mode) => (mode === "major" ? MAJOR_NAMES : MINOR_NAMES)[t];
+  const keyKo = (t, mode) => `${keyName(t, mode)} ${mode === "major" ? "장조" : "단조"}`;
+  const camelot = (t, mode) => {
+    const majorT = mode === "major" ? t : (t + 3) % 12;
+    return (((majorT * 7) % 12 + 7) % 12 + 1) + (mode === "major" ? "B" : "A");
+  };
+
+  function pearson(a, b) {
+    let ma = 0, mb = 0; for (let i = 0; i < 12; i++) { ma += a[i]; mb += b[i]; } ma /= 12; mb /= 12;
+    let num = 0, da = 0, db = 0;
+    for (let i = 0; i < 12; i++) { const x = a[i] - ma, y = b[i] - mb; num += x * y; da += x * x; db += y * y; }
+    return num / (Math.sqrt(da * db) || 1);
+  }
+
+  async function estimateKey(x) {
+    const N = 8192, H = 4096, fft = makeFFT(N), win = hann(N);
+    const pcOf = new Int8Array(N / 2).fill(-1);
+    for (let k = 1; k < N / 2; k++) {
+      const f = k * AR / N;
+      if (f < 80 || f > 2500) continue;
+      const midi = Math.round(69 + 12 * Math.log2(f / 440));
+      pcOf[k] = ((midi % 12) + 12) % 12;
+    }
+    const chroma = new Float64Array(12), c = new Float64Array(12);
+    const re = new Float32Array(N), im = new Float32Array(N);
+    const nF = Math.max(0, Math.floor((x.length - N) / H) + 1);
+    for (let f = 0; f < nF; f++) {
+      const o = f * H;
+      for (let i = 0; i < N; i++) { re[i] = x[o + i] * win[i]; im[i] = 0; }
+      fft(re, im);
+      c.fill(0); let total = 0;
+      for (let k = 1; k < N / 2; k++) {
+        const pc = pcOf[k]; if (pc < 0) continue;
+        const m = Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+        c[pc] += m; total += m;
+      }
+      if (total > 1e-9) { const w = Math.sqrt(total); for (let i = 0; i < 12; i++) chroma[i] += (c[i] / total) * w; }
+      if (f % 200 === 199) await tick();
+    }
+    const results = [];
+    for (const mode of ["major", "minor"]) {
+      for (let t = 0; t < 12; t++) {
+        const p = Array.from({ length: 12 }, (_, i) => PROFILE[mode][(i - t + 12) % 12]);
+        results.push({ tonic: t, mode, r: pearson(chroma, p) });
+      }
+    }
+    results.sort((a, b) => b.r - a.r);
+    return { chroma: Array.from(chroma), results };
+  }
+
+  // ---------- Rendering ----------
+  const fmtTime = s => { s = Math.max(0, s | 0); return `${(s / 60) | 0}:${String(s % 60).padStart(2, "0")}`; };
+  const confLabel = v => v >= 0.6 ? ["높음", "conf-high"] : v >= 0.3 ? ["보통", ""] : ["낮음", "conf-low"];
+  const r1 = v => Math.round(v * 10) / 10;
+
+  function foldBpm(bpm) {
+    const v = $("range").value;
+    if (v === "auto") return bpm;
+    const lo = +v;
+    while (bpm < lo - 0.05) bpm *= 2;
+    while (bpm >= 2 * lo + 0.05) bpm /= 2;
+    return bpm;
+  }
+
+  function renderTempo(t, bpm) {
+    const rounded = r1(bpm);
+    $("bpmInt").textContent = Math.floor(rounded);
+    $("bpmDec").textContent = "." + Math.round((rounded % 1) * 10);
+    const [cl, cc] = confLabel(t.conf);
+    $("bpmConf").textContent = cl; $("bpmConf").className = cc;
+    $("bpmAlt").textContent = `${r1(bpm / 2)} / ${r1(bpm * 2)}`;
+    $("bpmMs").textContent = `${Math.round(60000 / bpm)} ms`;
+
+    const svg = $("tempoChart"), W = 600, Hh = 130, pl = 10, pr = 10, pt = 12, pb = 24;
+    const lo = 60, hi = 200, X = b => pl + (b - lo) / (hi - lo) * (W - pl - pr);
+    const pts = t.bpms.map((b, i) => [b, t.scores[i]]).filter(([b]) => b >= lo && b <= hi);
+    const mx = Math.max(...pts.map(p => p[1])), mn = Math.min(0, ...pts.map(p => p[1]));
+    const Y = v => pt + (1 - (v - mn) / ((mx - mn) || 1)) * (Hh - pt - pb);
+    const line = pts.map(([b, v], i) => `${i ? "L" : "M"}${X(b).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+    const base = Y(mn).toFixed(1);
+    let g = "";
+    for (let b = 60; b <= 200; b += 20) g += `<line class="grid-l" x1="${X(b)}" x2="${X(b)}" y1="${pt}" y2="${Hh - pb}"/><text x="${X(b)}" y="${Hh - 8}" text-anchor="middle">${b}</text>`;
+    const mxB = Math.min(hi, Math.max(lo, bpm));
+    let pi = 0; t.bpms.forEach((b, i) => { if (Math.abs(b - mxB) < Math.abs(t.bpms[pi] - mxB)) pi = i; });
+    const peakV = t.scores[pi];
+    svg.innerHTML = g +
+      `<path class="area" d="${line}L${X(pts[pts.length - 1][0]).toFixed(1)},${base}L${X(pts[0][0]).toFixed(1)},${base}Z"/>` +
+      `<path class="line" d="${line}"/>` +
+      `<line class="mark" x1="${X(mxB)}" x2="${X(mxB)}" y1="${pt}" y2="${Hh - pb}"/>` +
+      `<circle class="dot" cx="${X(mxB)}" cy="${Y(peakV)}" r="3.5"/>`;
+  }
+
+  function renderKey(k) {
+    const top = k.results[0], panel = $("keyPanel");
+    panel.classList.remove("major", "minor"); panel.classList.add(top.mode);
+    $("keyTonic").textContent = keyName(top.tonic, top.mode);
+    $("keyMode").textContent = top.mode === "major" ? "장조" : "단조";
+    $("keyEn").textContent = `${keyName(top.tonic, top.mode)} ${top.mode}`;
+    const rel = top.mode === "major" ? { tonic: (top.tonic + 9) % 12, mode: "minor" } : { tonic: (top.tonic + 3) % 12, mode: "major" };
+    $("keyRel").textContent = keyKo(rel.tonic, rel.mode);
+    $("keyCam").textContent = camelot(top.tonic, top.mode);
+    const gap = top.r - k.results[1].r;
+    const confV = Math.max(0, Math.min(1, (top.r - 0.45) / 0.4)) * (gap < 0.02 ? 0.6 : 1);
+    const [cl, cc] = confLabel(confV);
+    $("keyConf").textContent = cl; $("keyConf").className = cc;
+
+    const maxR = top.r || 1;
+    $("cands").innerHTML = k.results.slice(0, 5).map(c =>
+      `<li><span class="name">${keyKo(c.tonic, c.mode)}</span><span class="track"><span class="fill ${c.mode}" style="width:${Math.max(2, (c.r / maxR) * 100).toFixed(1)}%"></span></span><span class="val">${c.r.toFixed(2)}</span></li>`
+    ).join("");
+
+    const cmax = Math.max(...k.chroma) || 1, scale = SCALE[top.mode].map(i => (i + top.tonic) % 12);
+    const cp = $("chromaPanel"); cp.classList.remove("major", "minor"); cp.classList.add(top.mode);
+    $("scaleLabel").textContent = keyKo(top.tonic, top.mode) + " 음계";
+    $("chroma").innerHTML = k.chroma.map((v, i) =>
+      `<div class="col${scale.includes(i) ? " in" : ""}${i === top.tonic ? " tonic" : ""}"><div class="bar" style="height:${Math.max(2, (v / cmax) * 100).toFixed(1)}%"></div><div class="pc">${PC_LABELS[i]}</div></div>`
+    ).join("");
+  }
+
+  function setStatus(msg, isError) {
+    const s = $("status");
+    s.hidden = !msg; s.textContent = msg || ""; s.classList.toggle("error", !!isError);
+  }
+
+  // ---------- Analysis pipeline ----------
+  const state = { buffer: null, beat: null };
+  let job = 0;
+
+  async function analyze(buffer, name, isSample) {
+    const my = ++job;
+    stopPlayback(); offset = 0;
+    state.buffer = buffer; state.beat = null; state.tempo = null;
+    $("srcTag").textContent = isSample ? "예시" : "내 파일";
+    $("srcTag").classList.toggle("real", !isSample);
+    $("trackName").textContent = name;
+    $("trackMeta").textContent = `${fmtTime(buffer.duration)} · ${(buffer.sampleRate / 1000).toFixed(1)} kHz`;
+    $("play").disabled = false;
+    updateTime();
+    setStatus("분석 중입니다…");
+    await tick();
+    try {
+      const mono = await toMono(buffer);
+      if (my !== job) return;
+      if (mono.length < AR * 3) throw new Error("short");
+      const { env, low, hop, lead } = onsetEnvelope(mono);
+      await tick();
+      const t = estimateTempo(env, hop);
+      const beat = refineBeat(env, low, hop, lead, t.bpm);
+      await tick();
+      const k = await estimateKey(mono);
+      if (my !== job) return;
+      state.tempo = { t, beat };
+      applyTempo();
+      renderKey(k);
+      setStatus("");
+    } catch (err) {
+      if (my !== job) return;
+      setStatus(err.message === "short" ? "곡이 너무 짧습니다. 3초 이상인 파일을 올려 주세요." : "분석하지 못했습니다. 다른 파일로 다시 시도해 주세요.", true);
+    }
+  }
+
+  function applyTempo() {
+    if (!state.tempo) return;
+    const { t, beat } = state.tempo, bpm = foldBpm(beat.bpm), period = 60 / bpm;
+    state.beat = { period, phase: beat.phase % period, bpm };
+    renderTempo(t, bpm);
+    resetBeatCursor();
+  }
+  $("range").addEventListener("change", () => {
+    try { localStorage.setItem("tk-range", $("range").value); } catch (e) {}
+    applyTempo();
+  });
+  try { const saved = localStorage.getItem("tk-range"); if (saved) $("range").value = saved; } catch (e) {}
+
+  async function handleFile(file) {
+    if (!file) return;
+    setStatus(`"${file.name}" 불러오는 중…`);
+    try {
+      const data = await file.arrayBuffer();
+      const dc = new OfflineAudioContext(1, 1, 44100);
+      // Callback form as well, for older iPhone Safari that ignores the promise.
+      const buf = await new Promise((res, rej) => { const p = dc.decodeAudioData(data, res, rej); if (p && p.then) p.then(res, rej); });
+      await analyze(buf, file.name.replace(/\.[^.]+$/, ""), false);
+    } catch (e) {
+      setStatus("이 파일을 읽을 수 없습니다. MP3, WAV, M4A 같은 오디오 파일인지 확인해 주세요. (브라우저에 따라 일부 형식은 지원되지 않습니다.)", true);
+    }
+  }
+
+  // ---------- Example track: synthesized drum + chord loop ----------
+  async function makeSample(bpm = 124, prog = [[57, 60, 64], [50, 53, 57], [52, 56, 59], [57, 60, 64]], bass = [45, 38, 40, 45]) {
+    const sr = 44100, beat = 60 / bpm, bars = 8, dur = bars * 4 * beat + 0.6;
+    const ctx = new OfflineAudioContext(1, Math.ceil(dur * sr), sr);
+    const master = ctx.createGain(); master.gain.value = 0.6; master.connect(ctx.destination);
+    const noise = ctx.createBuffer(1, sr, sr), nd = noise.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    const hz = m => 440 * Math.pow(2, (m - 69) / 12);
+    const env = (g, t, peak, a, d) => { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + d); };
+    const noiseHit = (t, type, freq, peak, d) => {
+      const s = ctx.createBufferSource(); s.buffer = noise;
+      const f = ctx.createBiquadFilter(); f.type = type; f.frequency.value = freq;
+      const g = ctx.createGain(); env(g, t, peak, 0.002, d);
+      s.connect(f).connect(g).connect(master); s.start(t, Math.random() * 0.5); s.stop(t + d + 0.05);
+    };
+    for (let bar = 0; bar < bars; bar++) {
+      const t0 = bar * 4 * beat, chord = prog[bar % prog.length];
+      for (const m of chord) for (const oct of [12, 24]) {
+        const o = ctx.createOscillator(); o.type = "triangle"; o.frequency.value = hz(m + oct);
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(oct === 12 ? 0.07 : 0.035, t0 + 0.03);
+        g.gain.setValueAtTime(oct === 12 ? 0.07 : 0.035, t0 + 4 * beat - 0.08); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 4 * beat);
+        o.connect(g).connect(master); o.start(t0); o.stop(t0 + 4 * beat + 0.01);
+      }
+      for (let b = 0; b < 4; b++) {
+        const t = t0 + b * beat;
+        const bo = ctx.createOscillator(); bo.type = "sawtooth"; bo.frequency.value = hz(bass[bar % bass.length]);
+        const bf = ctx.createBiquadFilter(); bf.type = "lowpass"; bf.frequency.value = 500;
+        const bg = ctx.createGain(); env(bg, t + beat / 2, 0.12, 0.01, beat * 0.4);
+        bo.connect(bf).connect(bg).connect(master); bo.start(t + beat / 2); bo.stop(t + beat);
+        const k = ctx.createOscillator(); k.frequency.setValueAtTime(140, t); k.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+        const kg = ctx.createGain(); env(kg, t, 0.9, 0.003, 0.32);
+        k.connect(kg).connect(master); k.start(t); k.stop(t + 0.4);
+        noiseHit(t + beat / 2, "highpass", 7000, 0.12, 0.05);
+        if (b % 2 === 1) noiseHit(t, "bandpass", 1800, 0.35, 0.16);
+      }
+    }
+    return ctx.startRendering();
+  }
+
+  // ---------- Playback & metronome ----------
+  let ac = null, src = null, playing = false, startAt = 0, offset = 0, clickOn = false, nextBeat = 0, schedTimer = 0;
+  const position = () => playing ? ac.currentTime - startAt : offset;
+
+  function startPlayback() {
+    if (!state.buffer) return;
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    ac.resume();
+    if (offset >= state.buffer.duration - 0.05) offset = 0;
+    src = ac.createBufferSource(); src.buffer = state.buffer; src.connect(ac.destination);
+    startAt = ac.currentTime + 0.03 - offset;
+    src.start(ac.currentTime + 0.03, offset);
+    src.onended = () => { if (playing) { playing = false; offset = 0; src = null; syncUI(); } };
+    playing = true;
+    resetBeatCursor();
+    clearInterval(schedTimer); schedTimer = setInterval(schedule, 40);
+    syncUI();
+  }
+  function stopPlayback() {
+    if (playing) { offset = position(); playing = false; if (src) { src.onended = null; try { src.stop(); } catch (e) {} } src = null; }
+    clearInterval(schedTimer);
+    syncUI();
+  }
+  function resetBeatCursor() {
+    const b = state.beat; if (!b) return;
+    nextBeat = Math.max(0, Math.ceil((position() - b.phase) / b.period));
+  }
+  function schedule() {
+    const b = state.beat; if (!playing || !clickOn || !b) return;
+    const horizon = ac.currentTime + 0.15;
+    while (true) {
+      const tTrack = b.phase + nextBeat * b.period, tCtx = startAt + tTrack;
+      if (tCtx > horizon || tTrack > state.buffer.duration) break;
+      if (tCtx >= ac.currentTime) {
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.frequency.value = 1600; g.gain.setValueAtTime(0.0001, tCtx);
+        g.gain.exponentialRampToValueAtTime(0.35, tCtx + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, tCtx + 0.05);
+        o.connect(g).connect(ac.destination); o.start(tCtx); o.stop(tCtx + 0.06);
+      }
+      nextBeat++;
+    }
+  }
+  function syncUI() { $("play").textContent = playing ? "일시정지" : "재생"; }
+  function updateTime() {
+    const d = state.buffer ? state.buffer.duration : 0, p = Math.min(d, position());
+    $("time").textContent = `${fmtTime(p)} / ${fmtTime(d)}`;
+    if (!seeking) $("seek").value = d ? Math.round((p / d) * 1000) : 0;
+  }
+  let seeking = false;
+  function frame() {
+    updateTime();
+    const b = state.beat, led = $("led");
+    if (b) {
+      const t = playing ? position() - b.phase : performance.now() / 1000;
+      const frac = ((t / b.period) % 1 + 1) % 1;
+      led.classList.toggle("on", frac < 0.12);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  $("play").addEventListener("click", () => playing ? stopPlayback() : startPlayback());
+  $("clickBtn").addEventListener("click", e => {
+    clickOn = !clickOn; e.currentTarget.setAttribute("aria-pressed", String(clickOn));
+    if (clickOn) resetBeatCursor();
+  });
+  $("seek").addEventListener("input", () => { seeking = true; });
+  $("seek").addEventListener("change", () => {
+    seeking = false;
+    if (!state.buffer) return;
+    const wasPlaying = playing; stopPlayback();
+    offset = ($("seek").value / 1000) * state.buffer.duration;
+    if (wasPlaying) startPlayback(); else updateTime();
+  });
+
+  // ---------- File input & drag-drop ----------
+  $("file").addEventListener("change", e => { handleFile(e.target.files[0]); e.target.value = ""; });
+  const drop = $("drop");
+  if (matchMedia("(pointer: coarse)").matches) $("dropHint").textContent = "MP3, WAV, M4A, FLAC, OGG";
+  window.addEventListener("dragover", e => { e.preventDefault(); drop.classList.add("over"); });
+  window.addEventListener("dragleave", e => { if (!e.relatedTarget) drop.classList.remove("over"); });
+  window.addEventListener("drop", e => {
+    e.preventDefault(); drop.classList.remove("over");
+    const f = [...(e.dataTransfer?.files || [])].find(f => f.type.startsWith("audio/") || /\.(mp3|wav|m4a|aac|ogg|flac|aiff?)$/i.test(f.name));
+    if (f) handleFile(f); else setStatus("오디오 파일을 놓아 주세요.", true);
+  });
+
+  // ---------- Tap tempo ----------
+  let taps = [];
+  function tap() {
+    const t = performance.now();
+    if (taps.length && t - taps[taps.length - 1] > 2000) taps = [];
+    taps.push(t); if (taps.length > 16) taps.shift();
+    $("tapCount").textContent = taps.length;
+    $("tapBpm").textContent = taps.length >= 2 ? r1(60000 / ((taps[taps.length - 1] - taps[0]) / (taps.length - 1))).toFixed(1) : "--";
+    const btn = $("tapBtn"); btn.classList.add("hit"); setTimeout(() => btn.classList.remove("hit"), 90);
+  }
+  $("tapBtn").addEventListener("pointerdown", e => { e.preventDefault(); tap(); });
+  $("tapBtn").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); tap(); } });
+  window.addEventListener("keydown", e => {
+    if ((e.key === "t" || e.key === "T") && !e.repeat && !e.metaKey && !e.ctrlKey && !(e.target instanceof HTMLInputElement)) tap();
+  });
+
+  // Exposed for testing in the console.
+  window.__tk = { makeSample, analyze, state };
+
+  requestAnimationFrame(frame);
+  makeSample().then(buf => analyze(buf, "합성 예시 루프 (124 BPM, A 단조로 만듦)", true))
+    .catch(() => setStatus("예시 곡을 만들지 못했습니다. 음악 파일을 직접 올려 주세요."));
+})();
+</script>
+<script>
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
